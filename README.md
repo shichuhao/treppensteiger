@@ -1,48 +1,135 @@
+# Stairbot Prototype – Code Overview
 
-## Stairbot Prototype – Short Overview
+This document briefly describes the structure and purpose of the prototype code for the Stairbot, an Arduino‑based stair‑climbing robot.
 
-This prototype is an Arduino‑based stair‑climbing robot (“Stairbot”) designed to climb stairs, turn on platforms, and go downhill autonomously, using low‑cost sensors and DC motors.
+## 1. Hardware Overview
 
-### Hardware
+- **Controller**: Arduino Uno  
+- **IMU**: MPU6050 (3‑axis accelerometer + 3‑axis gyroscope)  
+- **Distance sensor**: Ultrasonic module (e.g., HC‑SR04‑type)  
+- **Actuators**: Four DC motors with H‑bridge motor drivers  
+- **Wireless module**: ESP8266 for simple remote commands (e.g., stop, mode selection)
 
-- Arduino Uno as main controller
-- MPU6050 IMU for pitch/roll/yaw estimation
-- Ultrasonic sensor (HC‑SR04‑type) for distance to stairs/walls
-- Four DC motors with H‑bridge drivers
-- ESP8266 module for simple remote stop and mode commands
+The robot can climb stairs, turn on intermediate platforms, and go downhill while maintaining balance and heading.
 
+## 2. Numeric and Memory Design
 
-### Core Software Modules
+To fit within the 2 KB SRAM of the Arduino Uno, the code uses:
 
-- `init.*`
-    - Configures pins, motors, ultrasonic sensor, and I2C.
-    - Initializes and calibrates the MPU6050.
-    - Provides basic motor helpers (`motorsForward/Backward/RotateLeft/Right`) and `measureDistance()`.
-- `go_up.*`
-    - State machine for climbing stairs (approach, detect stair, climb, stabilize).
-    - Uses filtered ultrasonic distance and pitch/roll (stored as integers) to decide when to climb and when to stop.
-- `platform_turn.*`
-    - Detects a platform edge and performs a 90° turn.
-    - Uses a small distance history buffer and IMU tilt checks to avoid confusing walls with platforms.
-- `downhill.*`
-    - Detects descending slope and controls safe downhill motion.
-    - Tracks maximum pitch and uses yaw correction to keep a straight path.
-- `yaw_correction.*`
-    - Integrates gyro data to estimate yaw (heading) using integer math.
-    - Provides yaw deviation used by other modules to correct heading.
-- `remote_stop.*`
-    - Uses hardware serial with ESP8266 to receive simple commands (e.g., stop).
-    - Implements a remote emergency stop that immediately halts motors.
-- `stairbot_main.ino`
-    - Top‑level system state machine: idle, go up, platform turn, downhill, emergency stop.
-    - Handles serial commands, periodic status printing, and calls the behavior modules.
+- **Fixed‑point representation**  
+  - Angles (pitch, roll, yaw) stored as `int16_t` in degrees ×100  
+  - Distances stored as `uint16_t` in centimeters ×10  
+- **No dynamic allocation** (no `new`/`malloc` in user code)  
+- **Flash‑stored strings** using the `F()` macro for debug prints
 
+This design reduces RAM usage and avoids the overhead and instability of floats where possible.
 
-### Memory and Numeric Design
+## 3. Module Overview
 
-- Uses `int16_t` for angles (pitch/roll/yaw ×100) and `uint16_t` for distances (cm ×10) to save RAM and avoid float overhead.
-- Strings are stored in flash using `F()` macros to keep dynamic memory usage low.
+### 3.1 `init.h` / `init.cpp`
 
-If you describe your target audience (e.g., classmates, supervisor), the document can be adjusted in depth and tone.
-<span style="display:none">[^1][^10][^11][^12][^13][^14][^15][^16][^17][^18][^19][^2][^20][^21][^22][^23][^24][^25][^26][^27][^28][^29][^3][^30][^31][^32][^33][^34][^35][^36][^37][^38][^39][^4][^40][^41][^42][^43][^44][^5][^6][^7][^8][^9]</span>
+Responsibilities:
+
+- Define pin mappings for motors and sensors.  
+- Initialize all I/O pins and stop the motors at startup.  
+- Configure and initialize the MPU6050 over I2C (`Wire`).  
+- Calibrate the IMU by averaging multiple samples and writing bias offsets.  
+- Provide helper functions:
+  - `setupPins()`
+  - `initializeMPU6050()`
+  - `calibrateMPU6050()`
+  - `checkPlatformLevel()` – checks if the robot is standing on a level surface using pitch.
+  - `measureDistance()` – reads the ultrasonic sensor and returns distance in 0.1 cm units.
+  - Motor helpers: `motorsForward()`, `motorsBackward()`, `motorsRotateLeft()`, `motorsRotateRight()`, `stopAllMotors()`.
+
+### 3.2 `go_up.h` / `go_up.cpp`
+
+Implements the **stair‑climbing behavior** as a small state machine:
+
+- States include initialization, moving forward, detecting the first stair, climbing, stabilizing, and completion.  
+- Periodically reads:
+  - IMU data → pitch and roll (fixed‑point integers)  
+  - Ultrasonic distance → distance to the stair edge  
+- Uses filtered distance and pitch thresholds to:
+  - Detect when the robot is close enough to a stair.  
+  - Command the motors to climb at appropriate speed.  
+  - Decide when the robot has reached the top and needs to stabilize.
+
+### 3.3 `platform_turn.h` / `platform_turn.cpp`
+
+Handles **turning on an intermediate platform**:
+
+- Maintains a small history buffer of wall distances to distinguish a real platform edge from a nearby wall.  
+- Uses the IMU to confirm that the robot is approximately level before starting a turn.  
+- Performs a ~90° rotation using yaw feedback:
+  - Integrates gyro data from the IMU to estimate heading.  
+  - Rotates until the yaw difference reaches the desired angle within a tolerance.
+
+### 3.4 `downhill.h` / `downhill.cpp`
+
+Implements **downhill behavior**:
+
+- Detects a negative pitch beyond a configured threshold to recognize a descending slope.  
+- Records the most negative pitch reached to evaluate progress.  
+- Commands the motors to move cautiously downhill while:
+  - Correcting yaw to maintain a straight path.  
+  - Detecting when the robot has reached level ground again.  
+- Handles timeouts and retries if the downhill sequence does not complete in time.
+
+### 3.5 `yaw_correction.h` / `yaw_correction.cpp`
+
+Provides **heading estimation and yaw correction**:
+
+- Reads gyro data from the MPU6050 and performs a simple integration to estimate yaw.  
+- Stores yaw as an `int16_t` in degrees ×100 and keeps it normalized to a useful range (e.g., −180° to 180°).  
+- Exposes functions to:
+  - Initialize yaw reference.  
+  - Update yaw regularly.  
+  - Return yaw deviation for other modules to use for steering corrections.
+
+### 3.6 `remote_stop.h` / `remote_stop.cpp`
+
+Implements **remote stop and basic remote control** via the ESP8266:
+
+- Uses the hardware serial interface instead of a software serial port.  
+- Listens for simple one‑character commands from the ESP8266, for example:
+  - Stop command that immediately halts all motors (emergency stop).  
+- Stores timestamps of the last valid command to support possible timeouts or watchdog logic.
+
+### 3.7 `stairbot_main.ino`
+
+Top‑level **application and system state machine**:
+
+- Defines global system states such as:
+  - `IDLE`  
+  - `GO_UP` (climbing stairs)  
+  - `PLATFORM_TURN`  
+  - `DOWNHILL`  
+  - `EMERGENCY_STOP`
+- In `setup()`:
+  - Initializes serial, pins, IMU, ESP8266 communication, yaw correction, and level check.  
+  - Prints basic status information for debugging.  
+- In `loop()`:
+  - Checks for remote stop commands.  
+  - Dispatches to the appropriate behavior module based on the current state.  
+  - Periodically prints a compact status summary (pitch, roll, distance, and current state).
+
+## 4. Typical Control Flow
+
+1. System powers on and runs `setup()`.  
+2. IMU is initialized and calibrated; level is checked.  
+3. The robot waits in `IDLE` until a command (serial or ESP8266) selects a mode.  
+4. Depending on the mode:
+   - `GO_UP`: approach staircase and climb.  
+   - `PLATFORM_TURN`: detect platform and perform a 90° turn.  
+   - `DOWNHILL`: detect and descend a slope.  
+5. At any time, a remote stop command can trigger the emergency stop state, which shuts down all motors.
+
+## 5. Intended Use
+
+This prototype is intended as a research and teaching platform for:
+
+- Studying stair‑climbing and multi‑terrain locomotion.  
+- Experimenting with low‑cost sensing (IMU + ultrasonic).  
+- Exploring fixed‑point control algorithms on constrained microcontrollers.
 
