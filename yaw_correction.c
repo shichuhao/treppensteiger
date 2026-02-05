@@ -57,7 +57,7 @@ void initializeYawReference() {
     yawDeviation = 0.0;      // Clear any previous deviation
     lastYawUpdate = millis();
     
-    Serial.println("📐 Yaw reference initialized for straight climbing");
+    Serial.println(" Yaw reference initialized for straight climbing");
 }
 
 // ============================================================================
@@ -158,7 +158,7 @@ void applyYawCorrection() {
     if (abs(deviation) < YAW_CORRECTION_THRESHOLD) {
         // Within tolerance - no correction needed
         if (yawCorrectionActive) {
-            Serial.println("✓ Yaw correction complete (within tolerance)");
+            Serial.println(" Yaw correction complete (within tolerance)");
             yawCorrectionActive = false;
         }
         return;
@@ -166,7 +166,7 @@ void applyYawCorrection() {
     
     // Correction needed
     if (!yawCorrectionActive) {
-        Serial.println("🔧 Yaw correction activated");
+        Serial.println(" Yaw correction activated");
         yawCorrectionActive = true;
     }
     
@@ -192,7 +192,7 @@ void applyYawCorrection() {
     setMotorSpeed(leftSpeed, rightSpeed);
     
     // Debug output
-    Serial.print("🔧 Yaw correction: deviation = ");
+    Serial.print(" Yaw correction: deviation = ");
     Serial.print(deviation, 2);
     Serial.print("°, L_PWM = ");
     Serial.print(leftSpeed);
@@ -246,12 +246,12 @@ int calculateCorrectionPWM(float deviation) {
  * INSERT THIS CODE in controlMotors_UC03() after detecting climbing mode:
  */
 
-void controlMotors_UC03() {
+void controlMotors() {
     // ... existing remote stop check ...
     
     if (remoteStopRequested) {
         if (robotState != 0) {
-            executeStopCommand_Stop_UC02();
+            executeStopCommand_Stop();
         }
         return;
     }
@@ -263,8 +263,8 @@ void controlMotors_UC03() {
     }
     
     // Update sensor data
-    currentDistance = measureDistance_UC01();
-    updateAttitude_UC02();
+    currentDistance = measureDistance();
+    updateAttitude();
     
     // ... existing emergency stop logic ...
     
@@ -289,28 +289,29 @@ void controlMotors_UC03() {
         applyYawCorrection();  // This adjusts motor speeds internally
         
         robotState = 3;
-        Serial.println("🔺 CLIMBING MODE with yaw correction");
+        Serial.println(" CLIMBING MODE with yaw correction");
     }
     else if (stairDetected && !isClimbingMode) {
         setMotorSpeed(APPROACH_SPEED, APPROACH_SPEED);
         setMotorDirection(true);
         robotState = 2;
-        Serial.println("⚠️  STAIR DETECTED - Approaching");
+        Serial.println("  STAIR DETECTED - Approaching");
     }
     else if (isClimbingMode && !stairDetected) {
         // Still on incline - apply correction
         applyYawCorrection();
         robotState = 3;
-        Serial.println("🔺 ON INCLINE with yaw correction");
+        Serial.println(" ON INCLINE with yaw correction");
     }
     else {
         setMotorSpeed(NORMAL_SPEED, NORMAL_SPEED);
         setMotorDirection(true);
         robotState = 1;
-        Serial.println("✅ NORMAL MODE");
+        Serial.println(" NORMAL MODE");
     }
     
     Serial.println("=====================================\n");
 }
+
 
 
