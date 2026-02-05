@@ -1,3 +1,5 @@
+//This is the first version of the yaw correction code, which can only be used in upstair conditions.
+
 // ============================================================================
 // YAW CORRECTION MODULE - Using Gyroscope Only (No Magnetometer)
 // ============================================================================
@@ -179,8 +181,8 @@ void applyYawCorrection() {
     // Apply differential correction
     // Positive deviation (right drift) → increase left, decrease right
     // Negative deviation (left drift) → increase right, decrease left
-    int leftSpeed = baseSpeed + correctionPWM;
-    int rightSpeed = baseSpeed - correctionPWM;
+    int leftSpeed = baseSpeed - correctionPWM;
+    int rightSpeed = baseSpeed + correctionPWM;
     
     // Constrain to valid PWM range
     leftSpeed = constrain(leftSpeed, 0, 255);
@@ -310,3 +312,4 @@ void controlMotors_UC03() {
     
     Serial.println("=====================================\n");
 }
+
